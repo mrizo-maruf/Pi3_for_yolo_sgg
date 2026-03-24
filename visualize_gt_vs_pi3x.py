@@ -58,6 +58,17 @@ def parse_cam_params(cam_param_path):
     return fx, fy, cx, cy, png_depth_scale
 
 
+def parse_depth_scale_from_file(path):
+    """Parse a text file for `png_depth_scale: <float>`."""
+    if path is None or not os.path.isfile(path):
+        return None
+    content = open(path).read()
+    m = re.search(r'png_depth_scale:\s*([\d.eE\-+]+)', content)
+    if m:
+        return float(m.group(1))
+    return None
+
+
 def depth_to_pointcloud(depth_m, rgb, fx, fy, cx, cy, pose, tint, subsample):
     """
     Back-project depth map to a world-frame point cloud with tinted RGB colors.
@@ -145,8 +156,8 @@ def main():
     parser.add_argument('--frustum_scale', type=float, default=0.3,
                         help='Frustum size in meters (default: 0.3)')
     parser.add_argument('--pi3_depth_scale', type=float, default=None,
-                        help='Scale factor for Pi3 uint8 depth → meters. '
-                             'Auto-estimated from GT if not given.')
+                        help='Scale factor for Pi3 depth PNG values → meters. '
+                             'If not given: use pi3_depth metadata if available, otherwise auto-estimate from GT.')
     parser.add_argument('--cam_param', type=str, default=None,
                         help='Path to cam_param.txt (auto-detected)')
     args = parser.parse_args()
@@ -199,9 +210,23 @@ def main():
 
     print(f"Frames to render: {[i + 1 for i in frame_indices]}  subsample={subsample}")
 
-    # --- Auto-estimate Pi3 depth scale from first selected frame ---
+    # --- Resolve Pi3 depth scale ---
     pi3_depth_scale = args.pi3_depth_scale
     if pi3_depth_scale is None:
+        # Prefer explicit metadata written by the Pi3 exporter
+        meta_candidates = [
+            os.path.join(pi3_depth_dir, 'pi3_depth_meta.txt'),
+            os.path.join(pi3_depth_dir, 'depth_scale.txt'),
+        ]
+        for meta_path in meta_candidates:
+            scale = parse_depth_scale_from_file(meta_path)
+            if scale is not None:
+                pi3_depth_scale = scale
+                print(f"Pi3 depth scale from metadata ({meta_path}): {pi3_depth_scale:.10f}")
+                break
+
+    if pi3_depth_scale is None:
+        # Backward-compatible fallback for older exports (auto estimate from GT)
         idx0 = frame_indices[0]
         gt_path = os.path.join(gt_depth_dir, f'depth{idx0 + 1:06d}.png')
         pi3_path = os.path.join(pi3_depth_dir, f'depth{idx0:06d}.png')

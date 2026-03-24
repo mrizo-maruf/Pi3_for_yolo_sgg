@@ -2,7 +2,6 @@ import os
 import torch
 import numpy as np
 import cv2
-from PIL import Image
 import glob
 import time
 from pi3.models.pi3x import Pi3X
@@ -317,29 +316,48 @@ def process_depth_model(cfg):
     t_normalize_end = time.perf_counter()
     timings['normalize_compute'] = (t_normalize_end - t_normalize_start) * 1000  # ms
     
-    # --- Save Depth as PNG Images ---
+    # --- Save Depth as Metric PNG Images (uint16) ---
     t_save_png_start = time.perf_counter()
-    print(f"Saving depth images to: {new_depth_dir}")
+    depth_png_scale = float(getattr(cfg, 'pi3_png_depth_scale', 0.001))  # 1 unit = 1 mm
+    if depth_png_scale <= 0:
+        raise ValueError(f"pi3_png_depth_scale must be > 0, got {depth_png_scale}")
+
+    print(f"Saving metric depth images to: {new_depth_dir}")
+    print(f"Pi3 depth PNG encoding: uint16 with scale {depth_png_scale} m/unit")
+
+    depth_u16_max = np.iinfo(np.uint16).max
+    clipped_values = 0
     for i in range(depth_maps_np.shape[0]):
         depth = depth_maps_np[i]
-        
-        # Normalize depth to 0-255 range using global min/max
-        valid_mask = depth > 0
-        depth_normalized = np.zeros_like(depth)
+
+        valid_mask = np.logical_and(depth > 0, np.isfinite(depth))
+        depth_u16 = np.zeros_like(depth, dtype=np.uint16)
         if valid_mask.sum() > 0:
-            depth_normalized[valid_mask] = (depth[valid_mask] - global_depth_min) / (global_depth_max - global_depth_min) * 255
-            depth_normalized = np.clip(depth_normalized, 0, 255)
-        
-        depth_uint8 = depth_normalized.astype(np.uint8)
-        
-        # Save as grayscale PNG
-        img = Image.fromarray(depth_uint8, mode='L')
+            q = np.round(depth[valid_mask] / depth_png_scale)
+            clipped_values += int(np.count_nonzero(q > depth_u16_max))
+            q = np.clip(q, 1, depth_u16_max).astype(np.uint16)
+            depth_u16[valid_mask] = q
+
         output_path = os.path.join(new_depth_dir, f'depth{i:06d}.png')
-        img.save(output_path)
+        ok = cv2.imwrite(output_path, depth_u16)
+        if not ok:
+            raise IOError(f"Failed to save depth PNG: {output_path}")
+
+    # Save metadata for deterministic decoding in visualization
+    meta_path = os.path.join(new_depth_dir, 'pi3_depth_meta.txt')
+    with open(meta_path, 'w') as f:
+        f.write(f"png_depth_scale: {depth_png_scale:.10f}\n")
+        f.write("format: uint16\n")
+        f.write("description: depth_in_meters = png_value * png_depth_scale\n")
+        f.write(f"global_depth_min_m: {float(global_depth_min):.6f}\n")
+        f.write(f"global_depth_max_m: {float(global_depth_max):.6f}\n")
+    print(f"Saved Pi3 depth metadata: {meta_path}")
+    if clipped_values > 0:
+        print(f"Warning: clipped {clipped_values} depth values at uint16 max range")
     
     t_save_png_end = time.perf_counter()
     timings['save_png'] = (t_save_png_end - t_save_png_start) * 1000  # ms
-    print(f"Saved {depth_maps_np.shape[0]} depth images")
+    print(f"Saved {depth_maps_np.shape[0]} metric depth images")
     
     # --- Save Depth Video ---
     t_save_video_start = time.perf_counter()

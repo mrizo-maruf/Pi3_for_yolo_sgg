@@ -52,6 +52,7 @@ def main():
             'depth_model': 'yyfz233/Pi3X',
             'ckpt': str(LOCAL_PI3X_CKPT) if LOCAL_PI3X_CKPT.is_file() else None,
             'original_img': args.original_img,
+            'pi3_png_depth_scale': 0.001,
             'fx': 800.0,
             'fy': 800.0,
             'cx': 640.0,
