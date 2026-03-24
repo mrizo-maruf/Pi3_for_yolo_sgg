@@ -1,5 +1,6 @@
 from utils import process_depth_model
 import sys
+import argparse
 from pathlib import Path
 from omegaconf import OmegaConf
 
@@ -28,21 +29,36 @@ DEFAULT_SCENES = [
     # '/home/maribjonov_mr/IsaacSim_bench/simple_scene'
 ]
 
-for scene_path in DEFAULT_SCENES:
-    # Prepare paths
-    rgb_dir = str(Path(scene_path) / 'rgb')
-    depth_dir = str(Path(scene_path) / 'depth')
-    
-    # Process depth with Pi3X model if configured
-    temp_cfg = OmegaConf.create({
-        'rgb_dir': rgb_dir,
-        'depth_dir': depth_dir,
-        'traj_path': str(Path(scene_path) / "camera_poses.txt"),
-        'depth_model': 'yyfz233/Pi3X',
-        'ckpt': str(LOCAL_PI3X_CKPT) if LOCAL_PI3X_CKPT.is_file() else None,
-        'fx': 800.0,
-        'fy': 800.0,
-        'cx': 640.0,
-        'cy': 360.0
-    })
-    temp_cfg = process_depth_model(temp_cfg)
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Pi3X depth + pose processing on default scenes.")
+    parser.add_argument(
+        "--original_img",
+        action="store_true",
+        help="Use original image resolution (with minimal padding to meet model constraints).",
+    )
+    args = parser.parse_args()
+
+    for scene_path in DEFAULT_SCENES:
+        # Prepare paths
+        rgb_dir = str(Path(scene_path) / 'rgb')
+        depth_dir = str(Path(scene_path) / 'depth')
+
+        # Process depth with Pi3X model if configured
+        temp_cfg = OmegaConf.create({
+            'rgb_dir': rgb_dir,
+            'depth_dir': depth_dir,
+            'traj_path': str(Path(scene_path) / "camera_poses.txt"),
+            'depth_model': 'yyfz233/Pi3X',
+            'ckpt': str(LOCAL_PI3X_CKPT) if LOCAL_PI3X_CKPT.is_file() else None,
+            'original_img': args.original_img,
+            'fx': 800.0,
+            'fy': 800.0,
+            'cx': 640.0,
+            'cy': 360.0
+        })
+        process_depth_model(temp_cfg)
+
+
+if __name__ == "__main__":
+    main()

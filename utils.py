@@ -18,9 +18,25 @@ def _list_rgb_files(rgb_dir):
     return sorted(files)
 
 
-def _build_scaled_intrinsics_tensor(fx, fy, cx, cy, orig_h, orig_w, infer_h, infer_w, n_frames, device):
-    scale_x = float(infer_w) / float(orig_w)
-    scale_y = float(infer_h) / float(orig_h)
+def _build_scaled_intrinsics_tensor(
+    fx,
+    fy,
+    cx,
+    cy,
+    orig_h,
+    orig_w,
+    infer_h,
+    infer_w,
+    n_frames,
+    device,
+    apply_resize_scaling=True,
+):
+    if apply_resize_scaling:
+        scale_x = float(infer_w) / float(orig_w)
+        scale_y = float(infer_h) / float(orig_h)
+    else:
+        scale_x = 1.0
+        scale_y = 1.0
 
     K = torch.tensor(
         [
@@ -70,6 +86,7 @@ def process_depth_model(cfg):
             - traj_path: Path to original trajectory file
             - depth_model: Depth model name (e.g., 'yyfz233/Pi3X') or None
             - ckpt: Optional local checkpoint file/dir path
+            - original_img: If True, keep original image resolution (padding only if needed)
             - fx, fy, cx, cy: Camera intrinsics in original RGB resolution
     
     Returns:
@@ -99,7 +116,9 @@ def process_depth_model(cfg):
     fy = float(getattr(cfg, 'fy', 800.0))
     cx = float(getattr(cfg, 'cx', 640.0))
     cy = float(getattr(cfg, 'cy', 360.0))
+    original_img = bool(getattr(cfg, 'original_img', False))
     print(f"Using intrinsics (original image space): fx={fx:.3f}, fy={fy:.3f}, cx={cx:.3f}, cy={cy:.3f}")
+    print(f"Image sizing mode: {'original' if original_img else 'downscaled (default)'}")
     
     # Performance tracking
     timings = {}
@@ -145,7 +164,11 @@ def process_depth_model(cfg):
     # --- Load Images ---
     t_load_start = time.perf_counter()
     print(f"Loading images from: {cfg.rgb_dir}")
-    imgs = load_images_as_tensor(cfg.rgb_dir, interval=1).to(device)
+    imgs = load_images_as_tensor(
+        cfg.rgb_dir,
+        interval=1,
+        use_original_size=original_img,
+    ).to(device)
 
     rgb_image_files = _list_rgb_files(cfg.rgb_dir)
     if len(rgb_image_files) == 0:
@@ -170,8 +193,12 @@ def process_depth_model(cfg):
         infer_w=infer_w,
         n_frames=n_frames,
         device=device,
+        apply_resize_scaling=not original_img,
     )
-    print(f"Scaled intrinsics used by model (resized {infer_w}x{infer_h}):\n{K_scaled.detach().cpu().numpy()}")
+    if original_img:
+        print(f"Intrinsics used by model (original/padded mode {infer_w}x{infer_h}):\n{K_scaled.detach().cpu().numpy()}")
+    else:
+        print(f"Scaled intrinsics used by model (resized {infer_w}x{infer_h}):\n{K_scaled.detach().cpu().numpy()}")
 
     t_load_end = time.perf_counter()
     timings['image_load'] = (t_load_end - t_load_start) * 1000  # ms
@@ -261,16 +288,21 @@ def process_depth_model(cfg):
     print(f"Target resolution from first RGB image: {target_height}x{target_width}")
     
     # --- Upscale Depth Maps to Match RGB Resolution ---
-    upscaled_depth_maps = []
-    for i in range(depth_maps_np.shape[0]):
-        depth = depth_maps_np[i]
-        depth_upscaled = cv2.resize(depth, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
-        upscaled_depth_maps.append(depth_upscaled)
-    
-    depth_maps_np = np.stack(upscaled_depth_maps, axis=0)
+    infer_depth_h, infer_depth_w = depth_maps_np.shape[1], depth_maps_np.shape[2]
+    if original_img and infer_depth_h >= target_height and infer_depth_w >= target_width:
+        depth_maps_np = depth_maps_np[:, :target_height, :target_width]
+        print(f"Cropped depth maps to original image size: {depth_maps_np.shape}")
+    else:
+        upscaled_depth_maps = []
+        for i in range(depth_maps_np.shape[0]):
+            depth = depth_maps_np[i]
+            depth_upscaled = cv2.resize(depth, (target_width, target_height), interpolation=cv2.INTER_LINEAR)
+            upscaled_depth_maps.append(depth_upscaled)
+
+        depth_maps_np = np.stack(upscaled_depth_maps, axis=0)
     t_resize_end = time.perf_counter()
     timings['resize'] = (t_resize_end - t_resize_start) * 1000  # ms
-    print(f"Upscaled depth maps to shape: {depth_maps_np.shape}")
+    print(f"Depth maps output shape: {depth_maps_np.shape}")
     
     # --- Compute Global Min/Max for Consistent Normalization ---
     t_normalize_start = time.perf_counter()

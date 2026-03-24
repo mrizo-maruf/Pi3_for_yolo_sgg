@@ -8,7 +8,39 @@ from torchvision import transforms
 from plyfile import PlyData, PlyElement
 import numpy as np
 
-def load_images_as_tensor(path="data/truck", interval=1, PIXEL_LIMIT=255000, verbose=True):
+def _compute_target_size(W_orig, H_orig, PIXEL_LIMIT=255000, use_original_size=False):
+    if use_original_size:
+        target_w, target_h = W_orig, H_orig
+        if target_w % 14 != 0:
+            target_w = math.ceil(target_w / 14) * 14
+        if target_h % 14 != 0:
+            target_h = math.ceil(target_h / 14) * 14
+        return target_w, target_h
+
+    scale = math.sqrt(PIXEL_LIMIT / (W_orig * H_orig)) if W_orig * H_orig > 0 else 1
+    W_target, H_target = W_orig * scale, H_orig * scale
+    k, m = round(W_target / 14), round(H_target / 14)
+    while (k * 14) * (m * 14) > PIXEL_LIMIT:
+        if k / m > W_target / H_target:
+            k -= 1
+        else:
+            m -= 1
+    return max(1, k) * 14, max(1, m) * 14
+
+
+def _prepare_rgb_image(img_pil, W_orig, H_orig, TARGET_W, TARGET_H, use_original_size=False):
+    if use_original_size:
+        if img_pil.size != (W_orig, H_orig):
+            img_pil = img_pil.resize((W_orig, H_orig), Image.Resampling.LANCZOS)
+        if TARGET_W == W_orig and TARGET_H == H_orig:
+            return img_pil
+        padded_img = Image.new("RGB", (TARGET_W, TARGET_H), (0, 0, 0))
+        padded_img.paste(img_pil, (0, 0))
+        return padded_img
+    return img_pil.resize((TARGET_W, TARGET_H), Image.Resampling.LANCZOS)
+
+
+def load_images_as_tensor(path="data/truck", interval=1, PIXEL_LIMIT=255000, verbose=True, use_original_size=False):
     """
     Loads images from a directory or video, resizes them to a uniform size,
     then converts and stacks them into a single [N, 3, H, W] PyTorch tensor.
@@ -56,17 +88,23 @@ def load_images_as_tensor(path="data/truck", interval=1, PIXEL_LIMIT=255000, ver
     # This is necessary to ensure all tensors have the same dimensions for stacking.
     first_img = sources[0]
     W_orig, H_orig = first_img.size
-    scale = math.sqrt(PIXEL_LIMIT / (W_orig * H_orig)) if W_orig * H_orig > 0 else 1
-    W_target, H_target = W_orig * scale, H_orig * scale
-    k, m = round(W_target / 14), round(H_target / 14)
-    while (k * 14) * (m * 14) > PIXEL_LIMIT:
-        if k / m > W_target / H_target:
-            k -= 1
-        else:
-            m -= 1
-    TARGET_W, TARGET_H = max(1, k) * 14, max(1, m) * 14
+    TARGET_W, TARGET_H = _compute_target_size(
+        W_orig=W_orig,
+        H_orig=H_orig,
+        PIXEL_LIMIT=PIXEL_LIMIT,
+        use_original_size=use_original_size,
+    )
     if verbose:
-        print(f"All images will be resized to a uniform size: ({TARGET_W}, {TARGET_H})")
+        if use_original_size:
+            if (TARGET_W, TARGET_H) == (W_orig, H_orig):
+                print(f"Using original image size: ({TARGET_W}, {TARGET_H})")
+            else:
+                print(
+                    "Using original image size with right/bottom padding for model compatibility: "
+                    f"({TARGET_W}, {TARGET_H})"
+                )
+        else:
+            print(f"All images will be resized to a uniform size: ({TARGET_W}, {TARGET_H})")
 
     # --- 3. Resize images and convert them to tensors in the [0, 1] range ---
     tensor_list = []
@@ -75,8 +113,14 @@ def load_images_as_tensor(path="data/truck", interval=1, PIXEL_LIMIT=255000, ver
 
     for img_pil in sources:
         try:
-            # Resize to the uniform target size
-            resized_img = img_pil.resize((TARGET_W, TARGET_H), Image.Resampling.LANCZOS)
+            resized_img = _prepare_rgb_image(
+                img_pil=img_pil,
+                W_orig=W_orig,
+                H_orig=H_orig,
+                TARGET_W=TARGET_W,
+                TARGET_H=TARGET_H,
+                use_original_size=use_original_size,
+            )
             # Convert to tensor
             img_tensor = to_tensor_transform(resized_img)
             tensor_list.append(img_tensor)
@@ -91,7 +135,7 @@ def load_images_as_tensor(path="data/truck", interval=1, PIXEL_LIMIT=255000, ver
     return torch.stack(tensor_list, dim=0)
 
 
-def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_LIMIT=255000, verbose=True, device='cpu'):
+def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_LIMIT=255000, verbose=True, device='cpu', use_original_size=False):
     """
     Loads images (using strict original logic) and aligns optional conditions (poses, depths, intrinsics).
     
@@ -154,17 +198,23 @@ def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_L
     # This is necessary to ensure all tensors have the same dimensions for stacking.
     first_img = sources[0]
     W_orig, H_orig = first_img.size
-    scale = math.sqrt(PIXEL_LIMIT / (W_orig * H_orig)) if W_orig * H_orig > 0 else 1
-    W_target, H_target = W_orig * scale, H_orig * scale
-    k, m = round(W_target / 14), round(H_target / 14)
-    while (k * 14) * (m * 14) > PIXEL_LIMIT:
-        if k / m > W_target / H_target:
-            k -= 1
-        else:
-            m -= 1
-    TARGET_W, TARGET_H = max(1, k) * 14, max(1, m) * 14
+    TARGET_W, TARGET_H = _compute_target_size(
+        W_orig=W_orig,
+        H_orig=H_orig,
+        PIXEL_LIMIT=PIXEL_LIMIT,
+        use_original_size=use_original_size,
+    )
     if verbose:
-        print(f"All images will be resized to a uniform size: ({TARGET_W}, {TARGET_H})")
+        if use_original_size:
+            if (TARGET_W, TARGET_H) == (W_orig, H_orig):
+                print(f"Using original image size: ({TARGET_W}, {TARGET_H})")
+            else:
+                print(
+                    "Using original image size with right/bottom padding for model compatibility: "
+                    f"({TARGET_W}, {TARGET_H})"
+                )
+        else:
+            print(f"All images will be resized to a uniform size: ({TARGET_W}, {TARGET_H})")
 
     # --- 3. Resize images and convert them to tensors in the [0, 1] range ---
     tensor_list = []
@@ -173,8 +223,14 @@ def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_L
 
     for img_pil in sources:
         try:
-            # Resize to the uniform target size
-            resized_img = img_pil.resize((TARGET_W, TARGET_H), Image.Resampling.LANCZOS)
+            resized_img = _prepare_rgb_image(
+                img_pil=img_pil,
+                W_orig=W_orig,
+                H_orig=H_orig,
+                TARGET_W=TARGET_W,
+                TARGET_H=TARGET_H,
+                use_original_size=use_original_size,
+            )
             # Convert to tensor
             img_tensor = to_tensor_transform(resized_img)
             tensor_list.append(img_tensor)
@@ -201,8 +257,12 @@ def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_L
     if conditions is not None:
         # Calculate resize ratios for geometry alignment
         # (Must be calculated here because TARGET_W/H might have been adjusted by the while loop above)
-        scale_x = TARGET_W / W_orig
-        scale_y = TARGET_H / H_orig
+        if use_original_size:
+            scale_x = 1.0
+            scale_y = 1.0
+        else:
+            scale_x = TARGET_W / W_orig
+            scale_y = TARGET_H / H_orig
 
         # --- A. Process Poses (Slice) ---
         if 'poses' in conditions and conditions['poses'] is not None:
@@ -218,9 +278,20 @@ def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_L
             
             resized_depths_list = []
             for d_map in sliced_depths:
-                # Use Nearest Neighbor for depth to avoid flying pixels
-                # cv2.resize expects (width, height)
-                d_resized = cv2.resize(d_map, (TARGET_W, TARGET_H), interpolation=cv2.INTER_NEAREST)
+                if use_original_size:
+                    if d_map.shape != (H_orig, W_orig):
+                        d_base = cv2.resize(d_map, (W_orig, H_orig), interpolation=cv2.INTER_NEAREST)
+                    else:
+                        d_base = d_map
+                    if TARGET_H > H_orig or TARGET_W > W_orig:
+                        d_resized = np.zeros((TARGET_H, TARGET_W), dtype=d_base.dtype)
+                        d_resized[:H_orig, :W_orig] = d_base
+                    else:
+                        d_resized = d_base
+                else:
+                    # Use Nearest Neighbor for depth to avoid flying pixels
+                    # cv2.resize expects (width, height)
+                    d_resized = cv2.resize(d_map, (TARGET_W, TARGET_H), interpolation=cv2.INTER_NEAREST)
 
                 valid_depth = np.logical_and(d_resized > 0, np.isfinite(d_resized))
                 d_resized[~valid_depth] = 0
