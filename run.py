@@ -3,20 +3,29 @@ import sys
 from pathlib import Path
 from omegaconf import OmegaConf
 
+REPO_ROOT = Path(__file__).resolve().parent
+LOCAL_PI3X_CKPT = REPO_ROOT / "chkp" / "Pi3X" / "model.safetensors"
+USE_LOCAL_CKPT_ONLY = True
+
+if USE_LOCAL_CKPT_ONLY and not LOCAL_PI3X_CKPT.is_file():
+    raise FileNotFoundError(
+        f"Local Pi3X checkpoint not found at: {LOCAL_PI3X_CKPT}\n"
+        "Either place model.safetensors there or set USE_LOCAL_CKPT_ONLY=False."
+    )
 
 DEFAULT_SCENES = [
     # Isaac Sim scenes:
-    '../files/3D_SSGG_IsaacSim/cabinet_complex',
-    '../files/3D_SSGG_IsaacSim/cabinet_simple',
-    '../files/3D_SSGG_IsaacSim/nk_scene_complex',
-    '../files/3D_SSGG_IsaacSim/scene_1',
-    '../files/3D_SSGG_IsaacSim/scene_2',
-    '../files/3D_SSGG_IsaacSim/scene_3',
-    '../files/3D_SSGG_IsaacSim/scene_4',
-    '../files/3D_SSGG_IsaacSim/scene_5',
-    '../files/3D_SSGG_IsaacSim/scene_6',
-    '../files/3D_SSGG_IsaacSim/scene_7',
-    '../files/3D_SSGG_IsaacSim/simple_scene'
+    # '/home/maribjonov_mr/IsaacSim_bench/cabinet_complex',
+    '/home/maribjonov_mr/IsaacSim_bench/scene_2',
+    # '/home/maribjonov_mr/IsaacSim_bench/cabinet_simple',
+    # '/home/maribjonov_mr/IsaacSim_bench/nk_scene_complex',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_2',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_3',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_4',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_5',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_6',
+    # '/home/maribjonov_mr/IsaacSim_bench/scene_7',
+    # '/home/maribjonov_mr/IsaacSim_bench/simple_scene'
 ]
 
 for scene_path in DEFAULT_SCENES:
@@ -30,6 +39,7 @@ for scene_path in DEFAULT_SCENES:
         'depth_dir': depth_dir,
         'traj_path': str(Path(scene_path) / "camera_poses.txt"),
         'depth_model': 'yyfz233/Pi3X',
+        'ckpt': str(LOCAL_PI3X_CKPT) if LOCAL_PI3X_CKPT.is_file() else None,
         'fx': 800.0,
         'fy': 800.0,
         'cx': 640.0,

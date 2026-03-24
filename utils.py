@@ -35,6 +35,30 @@ def _build_scaled_intrinsics_tensor(fx, fy, cx, cy, orig_h, orig_w, infer_h, inf
     return K, K_seq
 
 
+def _resolve_ckpt_path(ckpt):
+    if ckpt is None:
+        return None
+
+    ckpt_path = os.path.abspath(os.path.expanduser(str(ckpt)))
+    if os.path.isfile(ckpt_path):
+        return ckpt_path
+
+    if os.path.isdir(ckpt_path):
+        candidates = (
+            os.path.join(ckpt_path, "model.safetensors"),
+            os.path.join(ckpt_path, "pytorch_model.bin"),
+        )
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        raise FileNotFoundError(
+            f"No checkpoint file found in directory: {ckpt_path}. "
+            f"Expected one of: model.safetensors, pytorch_model.bin"
+        )
+
+    raise FileNotFoundError(f"Checkpoint path does not exist: {ckpt_path}")
+
+
 def process_depth_model(cfg):
     """
     Process depth and trajectory using specified depth model.
@@ -45,6 +69,7 @@ def process_depth_model(cfg):
             - depth_dir: Path to original depth directory
             - traj_path: Path to original trajectory file
             - depth_model: Depth model name (e.g., 'yyfz233/Pi3X') or None
+            - ckpt: Optional local checkpoint file/dir path
             - fx, fy, cx, cy: Camera intrinsics in original RGB resolution
     
     Returns:
@@ -58,9 +83,15 @@ def process_depth_model(cfg):
     else:
         if cfg.depth_model not in depth_model_list:
             raise ValueError(f"Cannot use {cfg.depth_model} depth model, you should choose one from {depth_model_list}")
+
+    ckpt_path = _resolve_ckpt_path(getattr(cfg, 'ckpt', None))
         
     print("\n" + "="*60)
     print(f"DEPTH MODEL PROCESSING: {cfg.depth_model}")
+    if ckpt_path is not None:
+        print(f"Using local checkpoint: {ckpt_path}")
+    else:
+        print("No local checkpoint provided. Falling back to Hugging Face download (can take a while).")
     print("="*60)
 
     # Default pinhole intrinsics if not provided in config
@@ -82,7 +113,22 @@ def process_depth_model(cfg):
     t_model_start = time.perf_counter()
     device = 'cuda' if cuda_available else 'cpu'
     print(f"Loading model on {device}...")
-    model = Pi3X.from_pretrained(cfg.depth_model).to(device).eval()
+    if ckpt_path is not None:
+        print("  - Building Pi3X architecture...")
+        model = Pi3X().to(device).eval()
+        print("  - Loading checkpoint weights from disk...")
+        if ckpt_path.endswith('.safetensors'):
+            from safetensors.torch import load_file
+            weight = load_file(ckpt_path)
+        else:
+            weight = torch.load(ckpt_path, map_location=device, weights_only=False)
+        print("  - Applying state dict...")
+        model.load_state_dict(weight, strict=False)
+        print("  - Local checkpoint loaded.")
+    else:
+        print("  - Downloading/loading from Hugging Face...")
+        model = Pi3X.from_pretrained(cfg.depth_model).to(device).eval()
+        print("  - Hugging Face model loaded.")
     
     # Create Pi3XVO pipeline for efficient windowed inference
     pipe = Pi3XVO(model)
@@ -136,7 +182,7 @@ def process_depth_model(cfg):
     dtype = torch.bfloat16 if cuda_available and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     
     # Pi3XVO parameters
-    chunk_size = 20  # Number of frames per chunk
+    chunk_size = 30  # Number of frames per chunk
     overlap = 10     # Overlap between chunks for alignment
     
     print(f"Processing {imgs.shape[0]} frames with chunk_size={chunk_size}, overlap={overlap}")
