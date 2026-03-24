@@ -9,14 +9,18 @@ class Pi3XVO:
         self.model.eval()
 
     @torch.no_grad()
-    def __call__(self, imgs, chunk_size=16, overlap=6, conf_thre=0.05, inject_condition=None, dtype=torch.bfloat16):
+    def __call__(self, imgs, chunk_size=16, overlap=6, conf_thre=0.05, inject_condition=None, intrinsics=None, dtype=torch.bfloat16):
         """
         inject_condition: list of strings, e.g. ['pose', 'depth']
+        intrinsics: optional camera intrinsics, shape (B, T, 3, 3)
         """
         if inject_condition is None:
             inject_condition = []
             
         B, T, C, H, W = imgs.shape
+        if intrinsics is not None:
+            if intrinsics.shape[:2] != (B, T) or intrinsics.shape[-2:] != (3, 3):
+                raise ValueError(f"intrinsics should have shape (B, T, 3, 3), got {tuple(intrinsics.shape)}")
         print(f"[PiXVO] Total frames: {T}, Chunk size: {chunk_size}, Overlap: {overlap}")
 
         merged_points, merged_poses, merged_confs = [], [], []
@@ -36,6 +40,10 @@ class Pi3XVO:
                 break
 
             model_kwargs = {'with_prior': False}
+
+            if intrinsics is not None:
+                model_kwargs['intrinsics'] = intrinsics[:, start_idx:end_idx]
+                model_kwargs['with_prior'] = True
             
             if start_idx > 0:
                 if 'pose' in inject_condition and prev_aligned_poses_overlap is not None:
@@ -133,6 +141,7 @@ class Pi3XVO:
             if 'poses' in model_kwargs: del model_kwargs['poses']
             if 'depths' in model_kwargs: del model_kwargs['depths']
             if 'rays' in model_kwargs: del model_kwargs['rays']
+            if 'intrinsics' in model_kwargs: del model_kwargs['intrinsics']
             torch.cuda.empty_cache()
 
             if end_idx == T:
