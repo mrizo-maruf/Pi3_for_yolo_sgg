@@ -1,3 +1,19 @@
+### run stream
+```
+# Live camera with 30-frame max visible clouds
+python run_stream.py --source camera --max_pcds 30
+
+# Directory (simulated stream)
+python run_stream.py --source dir --rgb_dir /path/to/rgb --max_pcds 50 --subsample 4
+
+# Video, also save depth PNGs
+python run_stream.py --source video --video_path scene.mp4 --output_dir out/ --max_pcds 40
+
+# No visualization (save only, like before)
+python run_stream.py --source dir --rgb_dir /path --no_vis --output_dir out/
+
+```
+
 ### running with intrinsics
 ```
 python run.py
