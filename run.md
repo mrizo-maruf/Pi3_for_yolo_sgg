@@ -1,3 +1,125 @@
+# run.py — Pi3X Depth & Pose Pipeline
+
+## Overview
+
+`run.py` runs the Pi3X depth estimation and visual odometry pipeline on one or more datasets. Each dataset is defined by a YAML config file in the `configs/` directory.
+
+## Usage
+
+```bash
+# Run on a single dataset (by config name)
+python run.py isaac_sim
+
+# Run on multiple datasets
+python run.py isaac_sim scannetpp
+
+# Pass full path to config
+python run.py configs/isaac_sim.yaml
+
+# Keep original image resolution instead of downscaling
+python run.py isaac_sim --original_img
+
+# dynamic chunk size, overlap
+python run.py isaac_sim --chunk_size 50 --overlap 15
+```
+
+## Project Structure
+
+```
+.
+├── run.py                  # Entry point — loads configs, iterates scenes
+├── utils.py                # Core logic — model loading, inference, saving
+├── configs/
+│   ├── isaac_sim.yaml      # Isaac Sim dataset config
+│   └── scannetpp.yaml      # ScanNet++ dataset config
+└── chkp/
+    └── Pi3X/
+        └── model.safetensors   # Local Pi3X checkpoint (required)
+```
+
+## Config File Format
+
+Each YAML config has three sections:
+
+```yaml
+dataset: isaac_sim              # Dataset identifier (for logging)
+
+scenes:                         # List of scene directories to process
+  - /path/to/scene_1
+  - /path/to/scene_2
+
+camera:                         # Pinhole intrinsics (in original image resolution)
+  fx: 800.0
+  fy: 800.0
+  cx: 640.0
+  cy: 360.0
+
+pi3:                            # Pi3X model parameters
+  depth_model: yyfz233/Pi3X     # Model name
+  chunk_size: 30                # Frames per inference chunk
+  overlap: 10                   # Overlap between consecutive chunks
+  pi3_png_depth_scale: 0.001    # Depth encoding scale (meters per uint16 unit)
+```
+
+### Config Fields
+
+| Field | Description |
+|---|---|
+| `scenes` | Each scene directory must contain an `rgb/` folder with images and a `depth/` folder |
+| `camera.fx/fy/cx/cy` | Camera intrinsics in the original RGB image resolution. Optional — Pi3X can run without them, but providing them gives metrically accurate depth |
+| `pi3.chunk_size` | Number of frames processed together in one forward pass. Larger = more context but more GPU memory |
+| `pi3.overlap` | Number of frames shared between consecutive chunks for alignment. Must be < `chunk_size` |
+| `pi3.pi3_png_depth_scale` | Encoding scale for saved depth PNGs. `0.001` means 1 unit = 1 mm, giving 0–65.535 m range |
+
+## Expected Scene Directory Layout
+
+```
+scene_dir/
+├── rgb/                    # Input: RGB images (png/jpg)
+│   ├── 000000.png
+│   ├── 000001.png
+│   └── ...
+├── depth/                  # Input: original depth (not used by Pi3X, path tracked for reference)
+└── camera_poses.txt        # Input: original trajectory (not used by Pi3X, path tracked for reference)
+```
+
+## Output
+
+For a run with `chunk_size=30` and `overlap=10`, the pipeline creates:
+
+```
+scene_dir/
+├── pi3_depth_30_10/        # Output: Pi3X predicted depth maps
+│   ├── depth000000.png     #   uint16 PNGs (value × pi3_png_depth_scale = depth in meters)
+│   ├── depth000001.png
+│   ├── ...
+│   ├── depth_video.mp4     #   Grayscale depth visualization video
+│   └── pi3_depth_meta.txt  #   Encoding metadata (scale, format, depth range)
+└── pi3_traj_30_10.txt      # Output: camera poses (N lines, 16 floats = flattened 4×4 matrix)
+```
+
+The output folder/file names encode the chunk parameters: `pi3_depth_{chunk_size}_{overlap}` and `pi3_traj_{chunk_size}_{overlap}.txt`. This lets you compare results from different chunk/overlap settings side by side.
+
+## How It Works
+
+1. **Config loading** — `run.py` loads each YAML config via OmegaConf
+2. **Scene iteration** — For each scene in the config, builds a per-scene config with paths, camera params, and pi3 settings
+3. **`process_depth_model()`** in `utils.py` handles the rest:
+   - Loads Pi3X model from local checkpoint (`chkp/Pi3X/model.safetensors`)
+   - Loads RGB images as tensors, optionally resizing them
+   - Scales camera intrinsics to match the inference resolution
+   - Runs `Pi3XVO` pipeline with the specified `chunk_size` and `overlap`
+   - Extracts per-frame depth maps from predicted 3D points
+   - Upscales depth maps back to original RGB resolution
+   - Saves depth as uint16 PNGs + visualization video
+   - Saves camera poses as a text file
+
+## Checkpoint
+
+The local checkpoint is expected at `chkp/Pi3X/model.safetensors`. If `USE_LOCAL_CKPT_ONLY=True` (default), the script fails immediately if this file is missing. Set it to `False` to fall back to downloading from Hugging Face.
+
+---
+
 ### run stream
 ```
 # Live camera with 30-frame max visible clouds
@@ -16,11 +138,13 @@ python run_stream.py --source dir --rgb_dir /path --no_vis --output_dir out/
 
 ### running with intrinsics
 ```
-python run.py
+python run.py isaac_sim
 
 # original-size mode
-python run.py --original_img
+python run.py isaac_sim --original_img
 
+# multiple datasets
+python run.py isaac_sim scannetpp
 ```
 
 ```

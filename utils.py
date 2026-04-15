@@ -208,8 +208,8 @@ def process_depth_model(cfg):
     dtype = torch.bfloat16 if cuda_available and torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     
     # Pi3XVO parameters
-    chunk_size = 30  # Number of frames per chunk
-    overlap = 10     # Overlap between chunks for alignment
+    chunk_size = int(getattr(cfg, 'chunk_size', 30))
+    overlap = int(getattr(cfg, 'overlap', 10))
     
     print(f"Processing {imgs.shape[0]} frames with chunk_size={chunk_size}, overlap={overlap}")
     
@@ -261,16 +261,14 @@ def process_depth_model(cfg):
     
     # --- Create Output Directories ---
     t_create_dirs_start = time.perf_counter()
-    # Create pi3_depth directory near original depth folder
+    # Create pi3_depth_{chunk}_{overlap} directory near original depth folder
     depth_parent_dir = os.path.dirname(cfg.depth_dir)
-    new_depth_dir = os.path.join(depth_parent_dir, 'pi3_depth')
+    new_depth_dir = os.path.join(depth_parent_dir, f'pi3_depth_{chunk_size}_{overlap}')
     os.makedirs(new_depth_dir, exist_ok=True)
     
-    # Create pi3_traj path near original trajectory file
+    # Create pi3_traj_{chunk}_{overlap}.txt near original trajectory file
     traj_parent_dir = os.path.dirname(cfg.traj_path)
-    traj_basename = os.path.basename(cfg.traj_path)
-    traj_name, traj_ext = os.path.splitext(traj_basename)
-    new_traj_path = os.path.join(traj_parent_dir, f'pi3_{traj_name}{traj_ext}')
+    new_traj_path = os.path.join(traj_parent_dir, f'pi3_traj_{chunk_size}_{overlap}.txt')
     t_create_dirs_end = time.perf_counter()
     timings['create_dirs'] = (t_create_dirs_end - t_create_dirs_start) * 1000  # ms
     
@@ -338,7 +336,8 @@ def process_depth_model(cfg):
             q = np.clip(q, 1, depth_u16_max).astype(np.uint16)
             depth_u16[valid_mask] = q
 
-        output_path = os.path.join(new_depth_dir, f'depth{i:06d}.png')
+        output_name = os.path.splitext(os.path.basename(rgb_image_files[i]))[0] + '.png'
+        output_path = os.path.join(new_depth_dir, output_name)
         ok = cv2.imwrite(output_path, depth_u16)
         if not ok:
             raise IOError(f"Failed to save depth PNG: {output_path}")
@@ -358,30 +357,6 @@ def process_depth_model(cfg):
     t_save_png_end = time.perf_counter()
     timings['save_png'] = (t_save_png_end - t_save_png_start) * 1000  # ms
     print(f"Saved {depth_maps_np.shape[0]} metric depth images")
-    
-    # --- Save Depth Video ---
-    t_save_video_start = time.perf_counter()
-    video_path = os.path.join(new_depth_dir, 'depth_video.mp4')
-    H, W = depth_maps_np.shape[1], depth_maps_np.shape[2]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video_writer = cv2.VideoWriter(video_path, fourcc, 30.0, (W, H), isColor=False)
-    
-    for i in range(depth_maps_np.shape[0]):
-        depth = depth_maps_np[i]
-        
-        valid_mask = depth > 0
-        depth_normalized = np.zeros_like(depth)
-        if valid_mask.sum() > 0:
-            depth_normalized[valid_mask] = (depth[valid_mask] - global_depth_min) / (global_depth_max - global_depth_min) * 255
-            depth_normalized = np.clip(depth_normalized, 0, 255)
-        
-        depth_uint8 = depth_normalized.astype(np.uint8)
-        video_writer.write(depth_uint8)
-    
-    video_writer.release()
-    t_save_video_end = time.perf_counter()
-    timings['save_video'] = (t_save_video_end - t_save_video_start) * 1000  # ms
-    print(f"Depth video saved to: {video_path}")
     
     # --- Save Camera Poses (Trajectory) ---
     t_save_traj_start = time.perf_counter()

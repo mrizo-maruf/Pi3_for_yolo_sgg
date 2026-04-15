@@ -1,0 +1,26 @@
+# Isaac Sim dataset configuration
+dataset: isaac_sim
+
+scenes:
+  - /home/maribjonov_mr/IsaacSim_bench/scene_2
+  # - /home/maribjonov_mr/IsaacSim_bench/cabinet_complex
+  # - /home/maribjonov_mr/IsaacSim_bench/cabinet_simple
+  # - /home/maribjonov_mr/IsaacSim_bench/nk_scene_complex
+  # - /home/maribjonov_mr/IsaacSim_bench/scene_3
+  # - /home/maribjonov_mr/IsaacSim_bench/scene_4
+  # - /home/maribjonov_mr/IsaacSim_bench/scene_5
+  # - /home/maribjonov_mr/IsaacSim_bench/scene_6
+  # - /home/maribjonov_mr/IsaacSim_bench/scene_7
+  # - /home/maribjonov_mr/IsaacSim_bench/simple_scene
+
+camera:
+  fx: 800.0
+  fy: 800.0
+  cx: 640.0
+  cy: 360.0
+
+pi3:
+  depth_model: yyfz233/Pi3X
+  chunk_size: 16
+  overlap: 8
+  pi3_png_depth_scale: 0.001
