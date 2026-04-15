@@ -72,8 +72,8 @@ def main():
                 raise ValueError(f"No camera intrinsics for scene: {scene_path}. "
                                  "Provide per-scene camera or a global camera section.")
 
-            rgb_dir = str(Path(scene_path) / "rgb")
-            depth_dir = str(Path(scene_path) / "depth")
+            rgb_dir = str(Path(scene_path) / "images")
+            depth_dir = str(Path(scene_path) / "gt_depth")
 
             temp_cfg = OmegaConf.create({
                 "rgb_dir": rgb_dir,
