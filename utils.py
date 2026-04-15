@@ -167,7 +167,7 @@ def process_depth_model(cfg):
         cfg.rgb_dir,
         interval=1,
         use_original_size=original_img,
-    ).to(device)
+    )  # keep on CPU; pipeline moves chunks to GPU
 
     rgb_image_files = _list_rgb_files(cfg.rgb_dir)
     if len(rgb_image_files) == 0:
@@ -191,7 +191,7 @@ def process_depth_model(cfg):
         infer_h=infer_h,
         infer_w=infer_w,
         n_frames=n_frames,
-        device=device,
+        device='cpu',  # keep on CPU; pipeline moves chunks to GPU
         apply_resize_scaling=not original_img,
     )
     if original_img:

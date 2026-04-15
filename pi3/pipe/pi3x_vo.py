@@ -13,11 +13,13 @@ class Pi3XVO:
         """
         inject_condition: list of strings, e.g. ['pose', 'depth']
         intrinsics: optional camera intrinsics, shape (B, T, 3, 3)
+        imgs can reside on CPU; each chunk is moved to GPU for inference.
         """
         if inject_condition is None:
             inject_condition = []
             
         B, T, C, H, W = imgs.shape
+        device = next(self.model.parameters()).device
         if intrinsics is not None:
             if intrinsics.shape[:2] != (B, T) or intrinsics.shape[-2:] != (3, 3):
                 raise ValueError(f"intrinsics should have shape (B, T, 3, 3), got {tuple(intrinsics.shape)}")
@@ -31,7 +33,7 @@ class Pi3XVO:
 
         for start_idx in range(0, T, chunk_size - overlap):
             end_idx = min(start_idx + chunk_size, T)
-            chunk_imgs = imgs[:, start_idx:end_idx]
+            chunk_imgs = imgs[:, start_idx:end_idx].to(device)
             current_len = end_idx - start_idx
 
             print(f"  > Inference chunk: [{start_idx} : {end_idx}] (Length: {current_len})")
@@ -42,15 +44,15 @@ class Pi3XVO:
             model_kwargs = {'with_prior': False}
 
             if intrinsics is not None:
-                model_kwargs['intrinsics'] = intrinsics[:, start_idx:end_idx]
+                model_kwargs['intrinsics'] = intrinsics[:, start_idx:end_idx].to(device)
                 model_kwargs['with_prior'] = True
             
             if start_idx > 0:
                 if 'pose' in inject_condition and prev_aligned_poses_overlap is not None:
-                    prior_poses = torch.eye(4, device=imgs.device).repeat(B, current_len, 1, 1)
+                    prior_poses = torch.eye(4, device=device).repeat(B, current_len, 1, 1)
                     prior_poses[:, :overlap] = prev_aligned_poses_overlap
                     
-                    mask_pose = torch.zeros((B, current_len), dtype=torch.bool, device=imgs.device)
+                    mask_pose = torch.zeros((B, current_len), dtype=torch.bool, device=device)
                     mask_pose[:, :overlap] = True
                     
                     model_kwargs['poses'] = prior_poses
@@ -58,10 +60,10 @@ class Pi3XVO:
                     model_kwargs['with_prior'] = True
 
                 if 'depth' in inject_condition and prev_local_depth_overlap is not None:
-                    prior_depths = torch.zeros((B, current_len, H, W), device=imgs.device)
+                    prior_depths = torch.zeros((B, current_len, H, W), device=device)
                     prior_depths[:, :overlap] = prev_local_depth_overlap
                     
-                    mask_depth = torch.zeros((B, current_len), dtype=torch.bool, device=imgs.device)
+                    mask_depth = torch.zeros((B, current_len), dtype=torch.bool, device=device)
                     mask_depth[:, :overlap] = True
                     
                     if prev_local_conf_overlap is not None:
@@ -73,10 +75,10 @@ class Pi3XVO:
                     model_kwargs['with_prior'] = True
 
                 if ('ray' in inject_condition or 'intrinsic' in inject_condition) and prev_local_depth_overlap is not None:
-                    prior_rays = torch.zeros((B, current_len, H, W, 3), device=imgs.device)
+                    prior_rays = torch.zeros((B, current_len, H, W, 3), device=device)
                     prior_rays[:, :overlap] = prev_rays_overlap
                     
-                    mask_ray = torch.zeros((B, current_len), dtype=torch.bool, device=imgs.device)
+                    mask_ray = torch.zeros((B, current_len), dtype=torch.bool, device=device)
                     mask_ray[:, :overlap] = True
                     
                     model_kwargs['rays'] = prior_rays
@@ -121,23 +123,24 @@ class Pi3XVO:
                 aligned_poses = self._apply_sim3_to_poses(curr_poses, transform_matrix)
 
             if start_idx == 0:
-                merged_points.append(aligned_pts)
-                merged_poses.append(aligned_poses)
-                merged_confs.append(curr_conf)
+                merged_points.append(aligned_pts.cpu())
+                merged_poses.append(aligned_poses.cpu())
+                merged_confs.append(curr_conf.cpu())
             else:
-                merged_points.append(aligned_pts[:, overlap:])
-                merged_poses.append(aligned_poses[:, overlap:])
-                merged_confs.append(curr_conf[:, overlap:])
+                merged_points.append(aligned_pts[:, overlap:].cpu())
+                merged_poses.append(aligned_poses[:, overlap:].cpu())
+                merged_confs.append(curr_conf[:, overlap:].cpu())
             
-            prev_global_pts_overlap = aligned_pts[:, -overlap:]
-            prev_global_mask_overlap = curr_mask[:, -overlap:]
+            prev_global_pts_overlap = aligned_pts[:, -overlap:].clone()
+            prev_global_mask_overlap = curr_mask[:, -overlap:].clone()
 
-            prev_aligned_poses_overlap = aligned_poses[:, -overlap:]
-            prev_local_depth_overlap = curr_local_depth[:, -overlap:]
-            prev_local_conf_overlap = curr_conf[:, -overlap:]
-            prev_rays_overlap = curr_rays[:, -overlap:]
+            prev_aligned_poses_overlap = aligned_poses[:, -overlap:].clone()
+            prev_local_depth_overlap = curr_local_depth[:, -overlap:].clone()
+            prev_local_conf_overlap = curr_conf[:, -overlap:].clone()
+            prev_rays_overlap = curr_rays[:, -overlap:].clone()
             
             del pred, curr_pts, curr_poses, curr_mask, curr_local_depth, curr_conf, curr_rays
+            del aligned_pts, aligned_poses
             if 'poses' in model_kwargs: del model_kwargs['poses']
             if 'depths' in model_kwargs: del model_kwargs['depths']
             if 'rays' in model_kwargs: del model_kwargs['rays']
