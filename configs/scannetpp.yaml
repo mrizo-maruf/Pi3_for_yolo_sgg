@@ -2,28 +2,28 @@
 dataset: scannetpp
 
 scenes:
-  - path: /path/to/scannetpp/0a7cc12c0e
+  - path: /home/maribjonov_mr/Downloads/scanet_pi3/Scene0a7cc12c0e
     camera:
       fx: 692.521632038117
       fy: 693.8338930603499
       cx: 459.7604166616667
       cy: 344.7604166616666
 
-  - path: /path/to/scannetpp/0a76e06478
+  - path: /home/maribjonov_mr/Downloads/scanet_pi3/0a76e06478
     camera:
       fx: 693.040716229953
       fy: 693.8567456110736
       cx: 459.7604166616667
       cy: 344.7604166616666
 
-  - path: /path/to/scannetpp/0cf2e9402d
+  - path: /home/maribjonov_mr/Downloads/scanet_pi3/0cf2e9402d
     camera:
       fx: 693.0028640637556
       fy: 693.8261194026343
       cx: 459.7604166616667
       cy: 344.7604166616666
 
-  - path: /path/to/scannetpp/0b031f3119
+  - path: /home/maribjonov_mr/Downloads/scanet_pi3/0b031f3119
     camera:
       fx: 696.736460978845
       fy: 698.8676559965784
